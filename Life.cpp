@@ -33,32 +33,25 @@ class Node
 {
 public:
 	/**
-	*   Construct a leaf cell.
-	*/
-	Node(int living) 
-	{
-		nw = ne = sw = se = 0 ;
-		level = 1;//0 ;
-		alive = living ;
-
-		result[0] = 0;
-		result[1] = 0;
-	}
-	/**
 	*   Construct a node given four children.
 	*/
-	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, int living) 
+	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, bool living) 
 	{
 		nw = nw_ ;
 		ne = ne_ ;
 		sw = sw_ ;
 		se = se_ ;
-		level = nw_->level + 1 ;
 		alive = living;
+	}
 
+	void setup()
+	{
+		// Nasty hack
+		level = (nw < (void*)0x800)? 2 : nw->level + 1 ;
 		result[0] = 0;
 		result[1] = 0;
 	}
+
 	/**
 	*   Set a bit in this node in its relative coordinate system;
 	*   returns a whole new node since our nodes are immutable.
@@ -66,14 +59,14 @@ public:
 	*   In the recursive call, we simply adjust the coordinate system
 	*   and call down a level.
 	*/
-	Node* setBit(int x, int y) {
-		//if (level == 0)
-		//	return &aliveNode;
-		if (level == 1)
+	Node* setBit(int x, int y) 
+	{
+		// Nasty hack
+		if (this < (void*)0x800)
 		{
-			int idx = this - level1Nodes;
-			idx |= 1 << (-y * 2 - x);
-			return &level1Nodes[idx];
+			size_t idx = (size_t) this;
+			idx |= 1 << (-y * 4 - x);
+			return (Node*) idx;
 		}
 
 		// distance from center of this node to center of subnode is
@@ -95,14 +88,18 @@ public:
 	*   use this subroutine.  For convenience it returns 0/1 rather
 	*   than false/true.
 	*/
-	int getBit(int x, int y) {
+	int getBit(int x, int y) 
+	{
+		// Nasty hack
+		if (this < (void*)0x800)
+		{
+			size_t idx = (size_t) this;
+			return (idx & (1 << (-y * 4 - x))) ? 1 : 0;
+		}
 
         if (!alive)
             return 0;
-		//if (level == 0)
-		//	return 1;
-		if (level == 1)
-			return (alive & (1 << (-y * 4 - x))) ? 1 : 0;
+
 		int offset = 1 << (level - 2) ;
 		if (x < 0)
 			if (y < 0)
@@ -118,11 +115,12 @@ public:
 	/**
 	*   Build an empty tree at the given level.
 	*/
-	static Node* emptyTree(int lev) {
-		//if (lev == 0)
-		//	return &emptyNode;
+	static Node* emptyTree(int lev) 
+	{
+		// Nasty hack
 		if (lev == 1)
-			return &level1Nodes[0];
+			return 0;
+
 		Node* n = emptyTree(lev-1) ;
 		return create(n, n, n, n, false) ;
 	}
@@ -165,7 +163,6 @@ public:
 	Node* centerForward() {
 		return create(nw->se, ne->sw, sw->ne, se->nw)->nextGeneration() ;
 	}
-
 
 	/**
 	*   Return a new node one level down containing only the
@@ -255,7 +252,7 @@ public:
 	/**
 	*   create functions.
 	*/
-	static Node* create(Node* nw, Node* ne, Node* sw, Node* se, int living = true) {
+	static Node* create(Node* nw, Node* ne, Node* sw, Node* se, bool living = true) {
 		return Node(nw, ne, sw, se, living).intern() ;
 	}
 	static Node* create() {
@@ -269,18 +266,20 @@ public:
 
 	size_t hashCode() 
 	{
-        assert(level > 1);
-
-		return (size_t(nw) +
+		size_t result = (size_t(nw) +
 			11 * size_t(ne) +
 			101 * size_t(sw) +
-			1007 * size_t(se)) >> 5;
+			1007 * size_t(se));
+
+		// Nasty hack
+		if (nw > (void*)0x800)
+			result >>= 5;
+
+		return result;
 	}
 	
 	bool operator ==(const Node& t) const
 	{
-        assert(level > 1);
-
 		return nw == t.nw && ne == t.ne && sw == t.sw && se == t.se;
 	}
 
@@ -290,7 +289,7 @@ public:
 	*/
 	Node* intern() 
 	{
-		int i =  hashCode() % HASH_SIZE;
+		size_t i =  hashCode() % HASH_SIZE;
 
 		Node* canon;
 		for (canon = hashTable[i]; canon != 0; canon = canon->next)
@@ -301,7 +300,8 @@ public:
 			}
 		}
 		canon = new Node(*this);
-		assert(canon->alive == (canon->ne->alive || canon->nw->alive || canon->se->alive || canon->sw->alive));
+		canon->setup();
+		assert(canon->level == 2 || canon->alive == (canon->ne->alive || canon->nw->alive || canon->se->alive || canon->sw->alive));
 		canon->next = hashTable[i];
 		hashTable[i] = canon;
 		return canon;
@@ -315,23 +315,7 @@ public:
 	*   row with bit 5 being the cell itself, and bits 8..10
 	*   are the north neighbors.
 	*/
-	//Node* oneGen(int bitmask) 
-	//{
-	//	int self = bitmask & (1 << 5);
-	//	bitmask &= 0x757 ; // mask out bits we don't care about
-
-	//	if (bitmask == 0)
-	//		return &emptyNode;
-	//	bitmask &= bitmask - 1 ; // clear least significant bit
-	//	if (bitmask == 0)
-	//		return &emptyNode;
-	//	bitmask &= bitmask - 1 ; // clear least significant bit
-	//	if (bitmask == 0)
-	//		return self? &aliveNode : &emptyNode;
-	//	bitmask &= bitmask - 1 ; // clear least significant bit
-	//	return (bitmask == 0)? &aliveNode : &emptyNode;
-	//}
-	bool oneGen(int bitmask) 
+	static bool oneGen(int bitmask) 
 	{
 		int self = bitmask & (1 << 5);
 		bitmask &= 0x757 ; // mask out bits we don't care about
@@ -353,21 +337,14 @@ public:
 	*   At level 2, we can use slow simulation to compute the next
 	*   generation.  We use bitmask tricks.
 	*/
-	int allBits()
-	{
-		if (alive)
-			return (nw->alive << 5) + (ne->alive << 4) + (sw->alive << 1) + se->alive;
-		return 0;
-	}
 	Node* slowSimulation() 
 	{
-		//int allbits = (nw->allBits() << 10) + (ne->allBits() << 8) + (sw->allBits() << 2) + se->allBits();
-		int allbits = (nw->alive << 10) + (ne->alive << 8) + (sw->alive << 2) + se->alive;
-
-		//return create(oneGen(allbits>>5), oneGen(allbits>>4),
-		//	oneGen(allbits>>1), oneGen(allbits)) ;
-
-		return &level1Nodes[(oneGen(allbits>>5) << 3) + (oneGen(allbits>>4) << 2) + (oneGen(allbits>>1) << 1) + oneGen(allbits)];
+		// Nasty hack
+		size_t allbits = (size_t(nw) << 10) + (size_t(ne) << 8) + (size_t(sw) << 2) + size_t(se);
+		return (Node*) (size_t) ((cachedOneGen[allbits>>5] << 5) 
+			+ (cachedOneGen[(allbits>>4) & 0x7FF] << 4) 
+			+ (cachedOneGen[(allbits>>1) & 0x7FF] << 1) 
+			+ cachedOneGen[allbits & 0x7FF]);
 	}
 
 
@@ -384,32 +361,18 @@ public:
 
 	Node *nw, *ne, *sw, *se ; // our children
 	int level ;           // distance to root
-	int alive ;       // if leaf node, are we alive or dead?
+	bool alive ;       // if leaf node, are we alive or dead?
 	Node* result[2];
 	Node* next;
-
-//	static Node aliveNode;
-//	static Node emptyNode;
-
-	static Node level1Nodes[16];
 
     static char buffer[16 * 1024 * 1024]; 
     static char* bufferPtr;
 
 	static Node* hashTable[HASH_SIZE];
+
+	static bool cachedOneGen[0x800];
 };
 
-
-//Node Node::aliveNode(true);
-//Node Node::emptyNode(false);
-
-Node Node::level1Nodes[16] = 
-{
-	0x00, 0x01, 0x02, 0x03,
-	0x10, 0x11, 0x12, 0x13,
-	0x20, 0x21, 0x22, 0x23,
-	0x30, 0x31, 0x32, 0x33,
-};
 
 char Node::buffer[16 * 1024 * 1024]; 
 
@@ -417,6 +380,7 @@ char* Node::bufferPtr = Node::buffer;
 
 Node* Node::hashTable[HASH_SIZE];
 
+bool Node::cachedOneGen[0x800];
 
 class Universe
 {
@@ -428,6 +392,11 @@ public:
 		{
 			Node::bufferPtr = Node::buffer;
 			memset(Node::hashTable, 0, sizeof(Node::hashTable));
+		}
+		else
+		{
+			for (int i = 0; i < sizeof(Node::cachedOneGen) / sizeof(Node::cachedOneGen[0]); ++i)
+				Node::cachedOneGen[i] = Node::oneGen(i);
 		}
 
 		generationCount = 0;
