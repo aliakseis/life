@@ -35,7 +35,7 @@ public:
 	/**
 	*   Construct a leaf cell.
 	*/
-	Node(bool living) 
+	Node(int living) 
 	{
 		nw = ne = sw = se = 0 ;
 		level = 0 ;
@@ -47,7 +47,7 @@ public:
 	/**
 	*   Construct a node given four children.
 	*/
-	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, bool living) 
+	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, int living) 
 	{
 		nw = nw_ ;
 		ne = ne_ ;
@@ -244,7 +244,7 @@ public:
 	/**
 	*   create functions.
 	*/
-	static Node* create(Node* nw, Node* ne, Node* sw, Node* se, bool living = true) {
+	static Node* create(Node* nw, Node* ne, Node* sw, Node* se, int living = true) {
 		return Node(nw, ne, sw, se, living).intern() ;
 	}
 	static Node* create() {
@@ -304,30 +304,38 @@ public:
 	*   row with bit 5 being the cell itself, and bits 8..10
 	*   are the north neighbors.
 	*/
-	Node* oneGen(int bitmask) {
-		if (bitmask == 0)
-			return &emptyNode;
+	Node* oneGen(int bitmask) 
+	{
 		int self = bitmask & (1 << 5);
 		bitmask &= 0x757 ; // mask out bits we don't care about
-		int neighborCount = 0 ;
-		while (bitmask != 0) {
-			neighborCount++ ;
-			bitmask &= bitmask - 1 ; // clear least significant bit
-		}
-		if (neighborCount == 3 || (neighborCount == 2 && self != 0))
-			return &aliveNode;
-		else
+
+		if (bitmask == 0)
 			return &emptyNode;
+		bitmask &= bitmask - 1 ; // clear least significant bit
+		if (bitmask == 0)
+			return &emptyNode;
+		bitmask &= bitmask - 1 ; // clear least significant bit
+		if (bitmask == 0)
+			return self? &aliveNode : &emptyNode;
+		bitmask &= bitmask - 1 ; // clear least significant bit
+		return (bitmask == 0)? &aliveNode : &emptyNode;
 	}
+
+
 	/**
 	*   At level 2, we can use slow simulation to compute the next
 	*   generation.  We use bitmask tricks.
 	*/
-	Node* slowSimulation() {
-		int allbits = 0 ;
-		for (int y=-2; y<2; y++)
-			for (int x=-2; x<2; x++)
-				allbits = (allbits << 1) + getBit(x, y) ;
+	int allBits()
+	{
+		if (alive)
+			return (nw->alive << 5) + (ne->alive << 4) + (sw->alive << 1) + se->alive;
+		return 0;
+	}
+	Node* slowSimulation() 
+	{
+		int allbits = (nw->allBits() << 10) + (ne->allBits() << 8) + (sw->allBits() << 2) + se->allBits();
+
 		return create(oneGen(allbits>>5), oneGen(allbits>>4),
 			oneGen(allbits>>1), oneGen(allbits)) ;
 	}
@@ -346,7 +354,7 @@ public:
 
 	Node *nw, *ne, *sw, *se ; // our children
 	int level ;           // distance to root
-	bool alive ;       // if leaf node, are we alive or dead?
+	int alive ;       // if leaf node, are we alive or dead?
 	Node* result[2];
 	Node* next;
 
