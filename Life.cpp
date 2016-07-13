@@ -1,9 +1,15 @@
 // Life.cpp : Defines the entry point for the console application.
 //
+//	This is an adaptation of HashLife Java implementation by Tomas G. Rokicki:
+//	http://www.ddj.com/184406478
+//  Modified to allow producing arbitrary number of steps, converted to C++
+//
+//	Name: Aliaksei Sanko
+//	Blog: aliakseis.livejournal.com
+//	Country: Belarus
 
 #include "stdafx.h"
 
-#include <hash_set>
 #include <iostream>
 #include <fstream>
 
@@ -12,56 +18,19 @@
 
 #include <assert.h>
 
-using stdext::hash_set;
-using stdext::hash_compare;
 
-using std::cout;
 using std::cerr;
 using std::ofstream;
 using std::endl;
 
 
-class Node;
-
-struct IsNodePtrLess
-{
-	bool operator() (Node*, Node*) const;
-};
-
-
-namespace stdext 
-{
-
-size_t hash_value(Node*);
-
-}
-/*
-class hash_compare_ex : public hash_compare<Node*, IsNodePtrLess>
-{
-public:
-    // parameters for hash table
-    // min_buckets = 2 ^^ N, 0 < N
-    enum { min_buckets = 16 * 1024 };	
-
-};
-//*/
-
-
-//enum { HASH_SIZE = 104729 };
-//enum { HASH_SIZE = 127717 };
-enum { HASH_SIZE = 128 * 1024 };
-//enum { HASH_SIZE = 64 * 1024 };
+enum { HASH_SIZE = 64 * 1024 };
 
 /**
 *   This class contains the tree maintenance functions for quadtrees.
 */
 class Node 
 {
-
-	//typedef hash_set<Node*, 
-	//	hash_compare<Node*, IsNodePtrLess>
-	//> CacheType;
-
 public:
 	/**
 	*   Construct a leaf cell.
@@ -70,10 +39,7 @@ public:
 	{
 		nw = ne = sw = se = 0 ;
 		level = 0 ;
-		//alive = living ;
-		population = living;//alive ? 1 : 0 ;
-
-        //hash = population;
+		alive = living ;
 
 		result[0] = 0;
 		result[1] = 0;
@@ -81,21 +47,14 @@ public:
 	/**
 	*   Construct a node given four children.
 	*/
-	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_) 
+	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, bool living) 
 	{
 		nw = nw_ ;
 		ne = ne_ ;
 		sw = sw_ ;
 		se = se_ ;
 		level = nw_->level + 1 ;
-		population = nw->population + ne->population +
-			sw->population + se->population ;
-		//alive = population > 0 ;
-
-       // hash =  size_t(nw) +
-			    //11 * size_t(ne) +
-			    //101 * size_t(sw) +
-			    //1007 * size_t(se) ;
+		alive = living;
 
 		result[0] = 0;
 		result[1] = 0;
@@ -109,7 +68,6 @@ public:
 	*/
 	Node* setBit(int x, int y) {
 		if (level == 0)
-			//return new Node(true) ;
 			return &aliveNode;
 		// distance from center of this node to center of subnode is
 		// one fourth the size of this node.
@@ -132,10 +90,10 @@ public:
 	*/
 	int getBit(int x, int y) {
 
-        if (!population)
+        if (!alive)
             return 0;
 		if (level == 0)
-			return 1;//population ? 1 : 0 ;
+			return 1;
 		int offset = 1 << (level - 2) ;
 		if (x < 0)
 			if (y < 0)
@@ -153,9 +111,9 @@ public:
 	*/
 	static Node* emptyTree(int lev) {
 		if (lev == 0)
-			return &emptyNode;//create(false) ;
+			return &emptyNode;
 		Node* n = emptyTree(lev-1) ;
-		return create(n, n, n, n) ;
+		return create(n, n, n, n, false) ;
 	}
 	/**
 	*   Expand the universe; return a new node up one level with the
@@ -164,10 +122,10 @@ public:
 	*/
 	Node* expandUniverse() {
 		Node* border = emptyTree(level-1) ;
-		return create(create(border, border, border, nw),
-			create(border, border, ne, border),
-			create(border, sw, border, border),
-			create(se, border, border, border)) ;
+		return create(create(border, border, border, nw, nw->alive),
+			create(border, border, ne, border, ne->alive),
+			create(border, sw, border, border, sw->alive),
+			create(se, border, border, border, se->alive), alive) ;
 	}
 
 	/**
@@ -244,7 +202,7 @@ public:
 
 		if (result[direct] != 0)
 			return result[direct];
-		if (population == 0)
+		if (!alive)
 			return result[direct] = nw ;
 		if (level == 2)
 			return result[direct] = slowSimulation() ;
@@ -253,31 +211,31 @@ public:
 
 		if (direct)
 		{
-			n00 = nw->centeredSubnode(),
-			n01 = centeredHorizontal(nw, ne),
-			n02 = ne->centeredSubnode(),
-			n10 = centeredVertical(nw, sw),
-			n11 = centeredSubSubnode(),
-			n12 = centeredVertical(ne, se),
-			n20 = sw->centeredSubnode(),
-			n21 = centeredHorizontal(sw, se),
-			n22 = se->centeredSubnode() ;
-
+			n00 = nw->centeredSubnode();
+			n01 = centeredHorizontal(nw, ne);
+			n02 = ne->centeredSubnode();
+			n10 = centeredVertical(nw, sw);
+			n11 = centeredSubSubnode();
+			n12 = centeredVertical(ne, se);
+			n20 = sw->centeredSubnode();
+			n21 = centeredHorizontal(sw, se);
+			n22 = se->centeredSubnode();
 		}
 		else
 		{
-			n00 = nw->nextGeneration(),
-			n01 = horizontalForward(nw, ne),
-			n02 = ne->nextGeneration(),
-			n10 = verticalForward(nw, sw),
-			n11 = centerForward(),
-			n12 = verticalForward(ne, se),
-			n20 = sw->nextGeneration(),
-			n21 = horizontalForward(sw, se),
-			n22 = se->nextGeneration() ;
+			n00 = nw->nextGeneration();
+			n01 = horizontalForward(nw, ne);
+			n02 = ne->nextGeneration();
+			n10 = verticalForward(nw, sw);
+			n11 = centerForward();
+			n12 = verticalForward(ne, se);
+			n20 = sw->nextGeneration();
+			n21 = horizontalForward(sw, se);
+			n22 = se->nextGeneration();
 		}
 
-		return result[direct] = create(create(n00, n01, n10, n11)->nextGeneration(supplement),
+		return result[direct] = create(
+			create(n00, n01, n10, n11)->nextGeneration(supplement),
 			create(n01, n02, n11, n12)->nextGeneration(supplement),
 			create(n10, n11, n20, n21)->nextGeneration(supplement),
 			create(n11, n12, n21, n22)->nextGeneration(supplement)) ;
@@ -286,15 +244,11 @@ public:
 	/**
 	*   create functions.
 	*/
-	//static Node* create(bool living) {
-	//	return Node(living).intern() ;
-	//}
-	static Node* create(Node* nw, Node* ne, Node* sw, Node* se) {
-		return Node(nw, ne, sw, se).intern() ;
+	static Node* create(Node* nw, Node* ne, Node* sw, Node* se, bool living = true) {
+		return Node(nw, ne, sw, se, living).intern() ;
 	}
 	static Node* create() {
-		return //Node(false).
-            emptyTree(3) ;
+		return emptyTree(3) ;
 	}
 
 	/**
@@ -304,12 +258,7 @@ public:
 
 	size_t hashCode() 
 	{
-        //return hash;
-
         assert(level != 0);
-
-		//if (level == 0)
-		//	return population ;
 
 		return (size_t(nw) +
 			11 * size_t(ne) +
@@ -321,59 +270,28 @@ public:
 	{
         assert(level != 0);
 
-		if (level != t.level)
-			return false ;
-		//if (level == 0)
-		//	return population == t.population;
 		return nw == t.nw && ne == t.ne && sw == t.sw && se == t.se;
-	}
-
-	bool operator < (const Node& other) const
-	{
-        assert(level != 0);
-
-		if (level < other.level)
-			return true;
-		//if (level == 0)
-		//	return population < other.population;
-
-		return nw < other.nw 
-			|| nw == other.nw && (ne < other.ne 
-			|| ne == other.ne && (sw < other.sw || sw == other.sw && se < other.se));
 	}
 
 	/**
 	*   Given a node, return the canonical one if it exists, or make it
 	*   the canonical one.
 	*/
-	Node* intern() {
-
-		//CacheType::iterator it = cache.find(this);
-		//if (it != cache.end())
-		//	return *it;
-
-		//Node* canon = new Node(*this);
-		//cache.insert(canon);
-
-		//return canon;
-
+	Node* intern() 
+	{
 		int i =  hashCode() % HASH_SIZE;
-		int disp = 0;//(0 == i)? 1 : HASH_SIZE - i;
 
 		Node* canon;
-		while ((canon = hashTable[i]) != 0)
+		for (canon = hashTable[i]; canon != 0; canon = canon->next)
 		{
 			if (*this == *canon)
 			{
 				return canon;
 			}
-
-			disp++;
-			if ((i -= disp) < 0) 
-				i += HASH_SIZE;
 		}
-
 		canon = new Node(*this);
+		assert(canon->alive == (canon->ne->alive || canon->nw->alive || canon->se->alive || canon->sw->alive));
+		canon->next = hashTable[i];
 		hashTable[i] = canon;
 		return canon;
 	}
@@ -388,8 +306,8 @@ public:
 	*/
 	Node* oneGen(int bitmask) {
 		if (bitmask == 0)
-			return &emptyNode;//create(false) ;
-		int self = bitmask & (1 << 5);//(bitmask >> 5) & 1 ;
+			return &emptyNode;
+		int self = bitmask & (1 << 5);
 		bitmask &= 0x757 ; // mask out bits we don't care about
 		int neighborCount = 0 ;
 		while (bitmask != 0) {
@@ -397,9 +315,9 @@ public:
 			bitmask &= bitmask - 1 ; // clear least significant bit
 		}
 		if (neighborCount == 3 || (neighborCount == 2 && self != 0))
-			return &aliveNode;//create(true) ;
+			return &aliveNode;
 		else
-			return &emptyNode;//create(false) ;
+			return &emptyNode;
 	}
 	/**
 	*   At level 2, we can use slow simulation to compute the next
@@ -422,20 +340,16 @@ public:
         return result;
     }
 
-    void operator delete(void* ptr) 
+    void operator delete(void*) 
     {
     }
 
-//private:
 	Node *nw, *ne, *sw, *se ; // our children
 	int level ;           // distance to root
-	//bool alive ;       // if leaf node, are we alive or dead?
-	unsigned long population ;   // we cache the population here
+	bool alive ;       // if leaf node, are we alive or dead?
 	Node* result[2];
+	Node* next;
 
-    //size_t hash;
-
-	//static CacheType cache;
 	static Node aliveNode;
 	static Node emptyNode;
 
@@ -445,7 +359,6 @@ public:
 	static Node* hashTable[HASH_SIZE];
 };
 
-//Node::CacheType Node::cache;
 
 Node Node::aliveNode(true);
 Node Node::emptyNode(false);
@@ -457,24 +370,18 @@ char* Node::bufferPtr = Node::buffer;
 Node* Node::hashTable[HASH_SIZE];
 
 
-
-bool IsNodePtrLess::operator() (Node* left, Node* right) const
-{
-	return *left < *right;
-}
-
-
-size_t stdext::hash_value(Node* pNode)
-{
-	return  pNode->hashCode();
-}
-
-
 class Universe
 {
 public:
 	Universe()
 	{
+		// Initialize static nodes stuff
+		if (Node::bufferPtr != Node::buffer)
+		{
+			Node::bufferPtr = Node::buffer;
+			memset(Node::hashTable, 0, sizeof(Node::hashTable));
+		}
+
 		generationCount = 0;
 		root = Node::create();
 	}
@@ -520,11 +427,11 @@ public:
 		root = root->setBit(x, y) ;
 	}
 
-//private:
 	Node* root;
 	unsigned long generationCount;
 };
 
+/////////////////////////////////////////////////////////////////////
 
 void SetBit(Universe& universe, int x, int y)
 {
@@ -534,100 +441,62 @@ void SetBit(Universe& universe, int x, int y)
 }
 
 
-int main(int argc, char* argv[])
+int main(int /*argc*/, char* argv[])
 {
 	LARGE_INTEGER frequency;
-	::QueryPerformanceFrequency(&frequency);
+	QueryPerformanceFrequency(&frequency);
 	LARGE_INTEGER start, stop;
 
-	::QueryPerformanceCounter(&start);
+	QueryPerformanceCounter(&start);
     
-    Universe universe;
+	int runsCount = 0;
 
-	SetBit(universe, 1, 0);
-	SetBit(universe, 2, 0);
-	SetBit(universe, 0, 1);
-	SetBit(universe, 1, 1);
-	SetBit(universe, 1, 2);
-
-	universe.runSteps(1000);
-
-//    cout << "Cache size: " << Node::cache.size() << '\n';
-
-//*
-	char path[_MAX_PATH];
-	strcpy(path, argv[0]);
-	char* pFileName = PathFindFileNameA(path);
-
-	strcpy(pFileName, "results.txt");
-
-
-	HANDLE hFile = ::CreateFileA(
-		path,						// pointer to name of the file
-		GENERIC_READ|GENERIC_WRITE,// access (read-write) mode
-		0,									// share mode 
-		NULL,								// pointer to security attributes 
-		CREATE_ALWAYS,					// how to create 
-		FILE_ATTRIBUTE_NORMAL,		// file attributes 
-		NULL								// handle to file with attributes to copy
-	); 
-	if(INVALID_HANDLE_VALUE == hFile)
-		return EXIT_FAILURE;
- 
-	HANDLE hFileMapping = ::CreateFileMapping(
-		hFile,			// handle to file to map 
-		NULL,				// optional security attributes 
-		PAGE_READWRITE,// protection for mapping object 
-		0,					// high-order 32 bits of object size 
-		1000 * 1002,		// low-order 32 bits of object size 
-		NULL				// name of file-mapping object 
-	); 
-	if(NULL == hFileMapping)
+	for (;;) 
 	{
-		::CloseHandle(hFile);
-		return EXIT_FAILURE;
-	}
-	LPVOID pBuf = ::MapViewOfFile(hFileMapping, FILE_MAP_WRITE, 0, 0, 1000 * 1002);
-	if(NULL == pBuf)
-	{
-		::CloseHandle(hFile);
-		::CloseHandle(hFileMapping);
-		return EXIT_FAILURE;
-	}
+		Universe universe;
 
-    char* pPos = (char*) pBuf;
+		SetBit(universe, 1, 0);
+		SetBit(universe, 2, 0);
+		SetBit(universe, 0, 1);
+		SetBit(universe, 1, 1);
+		SetBit(universe, 1, 2);
 
-	//ofstream outputFile(path);
-	//if (!outputFile) 
-	//{
-	//	cerr << "Unable to open output file.\n";
-	//	return EXIT_FAILURE;
-	//}
+		universe.runSteps(1000);
 
-	for (int y = -500; y < 500; ++y)
-	{
-		for (int x = -500; x < 500; ++x)
+		runsCount++;
+
+		QueryPerformanceCounter(&stop);
+		if ((stop.QuadPart - start.QuadPart) / frequency.QuadPart < 5)
+			continue;
+
+		char path[_MAX_PATH];
+		strcpy(path, argv[0]);
+		char* pFileName = PathFindFileNameA(path);
+
+		strcpy(pFileName, "life.txt");
+
+		ofstream outputFile(path);
+		if (!outputFile) 
 		{
-			//outputFile << ((int) universe.root->getBit(x, y));
-            *pPos++ = '0' + universe.root->getBit(x, y);
+			cerr << "Unable to open output file.\n";
+			return EXIT_FAILURE;
 		}
-		//outputFile << '\n';
-        *pPos++ = 13;
-        *pPos++ = 10;
-	}
 
-//	outputFile.flush();
+		for (int y = -500; y < 500; ++y)
+		{
+			for (int x = -500; x < 500; ++x)
+			{
+				outputFile << ((int) universe.root->getBit(x, y));
+			}
+			outputFile << '\n';
+		}
 
-	::UnmapViewOfFile(pBuf);
-	::CloseHandle(hFile);
-	::CloseHandle(hFileMapping);
-//*/
+		outputFile << "\nSolution time: " <<
+			double(stop.QuadPart - start.QuadPart) / frequency.QuadPart / runsCount <<
+			" seconds" << endl;
 
-	QueryPerformanceCounter(&stop);
-	cout << "\nTotal time: " <<
-		double(stop.QuadPart - start.QuadPart) / frequency.QuadPart <<
-		" seconds" << endl;
+		break;
+	} 
 
 	return 0;
 }
-
