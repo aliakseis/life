@@ -38,7 +38,7 @@ public:
 	Node(int living) 
 	{
 		nw = ne = sw = se = 0 ;
-		level = 0 ;
+		level = 1;//0 ;
 		alive = living ;
 
 		result[0] = 0;
@@ -67,8 +67,15 @@ public:
 	*   and call down a level.
 	*/
 	Node* setBit(int x, int y) {
-		if (level == 0)
-			return &aliveNode;
+		//if (level == 0)
+		//	return &aliveNode;
+		if (level == 1)
+		{
+			int idx = this - level1Nodes;
+			idx |= 1 << (-y * 2 - x);
+			return &level1Nodes[idx];
+		}
+
 		// distance from center of this node to center of subnode is
 		// one fourth the size of this node.
 		int offset = 1 << (level - 2) ;
@@ -92,8 +99,10 @@ public:
 
         if (!alive)
             return 0;
-		if (level == 0)
-			return 1;
+		//if (level == 0)
+		//	return 1;
+		if (level == 1)
+			return (alive & (1 << (-y * 4 - x))) ? 1 : 0;
 		int offset = 1 << (level - 2) ;
 		if (x < 0)
 			if (y < 0)
@@ -110,8 +119,10 @@ public:
 	*   Build an empty tree at the given level.
 	*/
 	static Node* emptyTree(int lev) {
-		if (lev == 0)
-			return &emptyNode;
+		//if (lev == 0)
+		//	return &emptyNode;
+		if (lev == 1)
+			return &level1Nodes[0];
 		Node* n = emptyTree(lev-1) ;
 		return create(n, n, n, n, false) ;
 	}
@@ -258,7 +269,7 @@ public:
 
 	size_t hashCode() 
 	{
-        assert(level != 0);
+        assert(level > 1);
 
 		return (size_t(nw) +
 			11 * size_t(ne) +
@@ -268,7 +279,7 @@ public:
 	
 	bool operator ==(const Node& t) const
 	{
-        assert(level != 0);
+        assert(level > 1);
 
 		return nw == t.nw && ne == t.ne && sw == t.sw && se == t.se;
 	}
@@ -304,21 +315,37 @@ public:
 	*   row with bit 5 being the cell itself, and bits 8..10
 	*   are the north neighbors.
 	*/
-	Node* oneGen(int bitmask) 
+	//Node* oneGen(int bitmask) 
+	//{
+	//	int self = bitmask & (1 << 5);
+	//	bitmask &= 0x757 ; // mask out bits we don't care about
+
+	//	if (bitmask == 0)
+	//		return &emptyNode;
+	//	bitmask &= bitmask - 1 ; // clear least significant bit
+	//	if (bitmask == 0)
+	//		return &emptyNode;
+	//	bitmask &= bitmask - 1 ; // clear least significant bit
+	//	if (bitmask == 0)
+	//		return self? &aliveNode : &emptyNode;
+	//	bitmask &= bitmask - 1 ; // clear least significant bit
+	//	return (bitmask == 0)? &aliveNode : &emptyNode;
+	//}
+	bool oneGen(int bitmask) 
 	{
 		int self = bitmask & (1 << 5);
 		bitmask &= 0x757 ; // mask out bits we don't care about
 
 		if (bitmask == 0)
-			return &emptyNode;
+			return 0;
 		bitmask &= bitmask - 1 ; // clear least significant bit
 		if (bitmask == 0)
-			return &emptyNode;
+			return 0;
 		bitmask &= bitmask - 1 ; // clear least significant bit
 		if (bitmask == 0)
-			return self? &aliveNode : &emptyNode;
+			return self? 1 : 0;
 		bitmask &= bitmask - 1 ; // clear least significant bit
-		return (bitmask == 0)? &aliveNode : &emptyNode;
+		return (bitmask == 0)? 1 : 0;
 	}
 
 
@@ -334,10 +361,13 @@ public:
 	}
 	Node* slowSimulation() 
 	{
-		int allbits = (nw->allBits() << 10) + (ne->allBits() << 8) + (sw->allBits() << 2) + se->allBits();
+		//int allbits = (nw->allBits() << 10) + (ne->allBits() << 8) + (sw->allBits() << 2) + se->allBits();
+		int allbits = (nw->alive << 10) + (ne->alive << 8) + (sw->alive << 2) + se->alive;
 
-		return create(oneGen(allbits>>5), oneGen(allbits>>4),
-			oneGen(allbits>>1), oneGen(allbits)) ;
+		//return create(oneGen(allbits>>5), oneGen(allbits>>4),
+		//	oneGen(allbits>>1), oneGen(allbits)) ;
+
+		return &level1Nodes[(oneGen(allbits>>5) << 3) + (oneGen(allbits>>4) << 2) + (oneGen(allbits>>1) << 1) + oneGen(allbits)];
 	}
 
 
@@ -358,8 +388,10 @@ public:
 	Node* result[2];
 	Node* next;
 
-	static Node aliveNode;
-	static Node emptyNode;
+//	static Node aliveNode;
+//	static Node emptyNode;
+
+	static Node level1Nodes[16];
 
     static char buffer[16 * 1024 * 1024]; 
     static char* bufferPtr;
@@ -368,8 +400,16 @@ public:
 };
 
 
-Node Node::aliveNode(true);
-Node Node::emptyNode(false);
+//Node Node::aliveNode(true);
+//Node Node::emptyNode(false);
+
+Node Node::level1Nodes[16] = 
+{
+	0x00, 0x01, 0x02, 0x03,
+	0x10, 0x11, 0x12, 0x13,
+	0x20, 0x21, 0x22, 0x23,
+	0x30, 0x31, 0x32, 0x33,
+};
 
 char Node::buffer[16 * 1024 * 1024]; 
 
