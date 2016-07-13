@@ -5,11 +5,17 @@
 
 #include <hash_set>
 #include <iostream>
+#include <fstream>
+
+#include <shlwapi.h>
+#pragma comment(lib, "shlwapi")
 
 using stdext::hash_set;
 using stdext::hash_compare;
 
-using std::cout;
+//using std::cout;
+using std::cerr;
+using std::ofstream;
 
 
 class Node;
@@ -45,7 +51,8 @@ public:
 		level = 0 ;
 		alive = living ;
 		population = alive ? 1 : 0 ;
-		result = 0;
+		result[0] = 0;
+		result[1] = 0;
 	}
 	/**
 	*   Construct a node given four children.
@@ -60,7 +67,8 @@ public:
 		population = nw->population + ne->population +
 			sw->population + se->population ;
 		alive = population > 0 ;
-		result = 0;
+		result[0] = 0;
+		result[1] = 0;
 	}
 	/**
 	*   Set a bit in this node in its relative coordinate system;
@@ -156,11 +164,35 @@ public:
 		return create(nw->se, ne->sw, sw->ne, se->nw)->nextGeneration() ;
 	}
 
-	Node* sameGeneration() {
-		return create(nw->se,
-					  ne->sw,
-					  sw->ne,
-					  se->nw);
+
+	/**
+	*   Return a new node one level down containing only the
+	*   center elements.
+	*/
+	Node* centeredSubnode() {
+		return create(nw->se, ne->sw, sw->ne, se->nw) ;
+	}
+	/**
+	*   Return a new node one level down from two given nodes
+	*   that contains the east centered two sub sub nodes from
+	*   the west node and the west centered two sub sub nodes
+	*   from the east node.
+	*/
+	Node* centeredHorizontal(Node* w, Node* e) {
+		return create(w->ne->se, e->nw->sw, w->se->ne, e->sw->nw) ;
+	}
+	/**
+	*   Similar, but this does it north/south instead of east/west.
+	*/
+	Node* centeredVertical(Node* n, Node* s) {
+		return create(n->sw->se, n->se->sw, s->nw->ne, s->ne->nw) ;
+	}
+	/**
+	*   Return a new node two levels down containing only the
+	*   centered elements.
+	*/
+	Node* centeredSubSubnode() {
+		return create(nw->se->se, ne->sw->sw, sw->ne->ne, se->nw->nw) ;
 	}
 
 	/**
@@ -173,40 +205,49 @@ public:
 	*   of the current node.  It combines these four subnodes into
 	*   a new node and returns that as its result.
 	*/
-	Node* nextGeneration() {
+	Node* nextGeneration(unsigned long supplement = 0)
+	{
+		bool direct = level > 2 && (supplement & (1ul << (level - 3)));
 
-		//if (level == 3)
-		//	return create(nw->se,
-		//				  ne->sw,
-		//				  sw->ne,
-		//				  se->nw);
-
-		if (result != 0)
-			return result ;
+		if (result[direct] != 0)
+			return result[direct];
 		if (population == 0)
-			return result = nw ;
+			return result[direct] = nw ;
 		if (level == 2)
-			return result = slowSimulation() ;
-		Node *n00 = nw->nextGeneration(),
-			*n01 = horizontalForward(nw, ne),
-			*n02 = ne->nextGeneration(),
-			*n10 = verticalForward(nw, sw),
-			*n11 = centerForward(),
-			*n12 = verticalForward(ne, se),
-			*n20 = sw->nextGeneration(),
-			*n21 = horizontalForward(sw, se),
-			*n22 = se->nextGeneration() ;
+			return result[direct] = slowSimulation() ;
 
-		//if (level == 3)
-		//	return result = create(create(n00, n01, n10, n11)->sameGeneration(),
-		//		create(n01, n02, n11, n12)->sameGeneration(),
-		//		create(n10, n11, n20, n21)->sameGeneration(),
-		//		create(n11, n12, n21, n22)->sameGeneration()) ;
+		Node *n00, *n01 ,*n02 ,*n10 ,*n11 ,*n12 ,*n20 ,*n21 ,*n22; 
 
-		return result = create(create(n00, n01, n10, n11)->nextGeneration(),
-			create(n01, n02, n11, n12)->nextGeneration(),
-			create(n10, n11, n20, n21)->nextGeneration(),
-			create(n11, n12, n21, n22)->nextGeneration()) ;
+		if (direct)
+		{
+			n00 = nw->centeredSubnode(),
+			n01 = centeredHorizontal(nw, ne),
+			n02 = ne->centeredSubnode(),
+			n10 = centeredVertical(nw, sw),
+			n11 = centeredSubSubnode(),
+			n12 = centeredVertical(ne, se),
+			n20 = sw->centeredSubnode(),
+			n21 = centeredHorizontal(sw, se),
+			n22 = se->centeredSubnode() ;
+
+		}
+		else
+		{
+			n00 = nw->nextGeneration(),
+			n01 = horizontalForward(nw, ne),
+			n02 = ne->nextGeneration(),
+			n10 = verticalForward(nw, sw),
+			n11 = centerForward(),
+			n12 = verticalForward(ne, se),
+			n20 = sw->nextGeneration(),
+			n21 = horizontalForward(sw, se),
+			n22 = se->nextGeneration() ;
+		}
+
+		return result[direct] = create(create(n00, n01, n10, n11)->nextGeneration(supplement),
+			create(n01, n02, n11, n12)->nextGeneration(supplement),
+			create(n10, n11, n20, n21)->nextGeneration(supplement),
+			create(n11, n12, n21, n22)->nextGeneration(supplement)) ;
 	}
 
 	/**
@@ -236,16 +277,16 @@ public:
 			101 * size_t(sw) +
 			1007 * size_t(se) ;
 	}
-	/*
-	public bool equals(Object o) {
-		TreeNode t = (TreeNode)o ;
+	
+	bool operator ==(const Node& t) const
+	{
 		if (level != t.level)
 			return false ;
 		if (level == 0)
 			return alive == t.alive ;
 		return nw == t.nw && ne == t.ne && sw == t.sw && se == t.se ;
 	}
-	*/
+
 	bool operator < (const Node& other) const
 	{
 		if (level < other.level)
@@ -315,7 +356,7 @@ public:
 	int level ;           // distance to root
 	bool alive ;       // if leaf node, are we alive or dead?
 	unsigned long population ;   // we cache the population here
-	Node* result;
+	Node* result[2];
 
 	static CacheType cache;
 	static Node aliveNode;
@@ -347,19 +388,21 @@ public:
 		root = Node::create();
 	}
 
-	void runStep() 
+	void runSteps(unsigned long numSteps) 
 	{
 		while (root->level < 3 ||
-			root->nw->population != root->nw->se->se->population ||
-			root->ne->population != root->ne->sw->sw->population ||
-			root->sw->population != root->sw->ne->ne->population ||
-			root->se->population != root->se->nw->nw->population)
-			root = root->expandUniverse() ;
+				root->nw->population != root->nw->se->se->population ||
+				root->ne->population != root->ne->sw->sw->population ||
+				root->sw->population != root->sw->ne->ne->population ||
+				root->se->population != root->se->nw->nw->population)
+			root = root->expandUniverse();
 
-		unsigned long stepSize = 1ul << (root->level - 2);
+		unsigned long stepSize;
+		while ((stepSize = 1ul << (root->level - 2)) < numSteps)
+			root = root->expandUniverse();
 
-		root = root->nextGeneration() ;
-		generationCount += stepSize ;
+		root = root->nextGeneration(stepSize - numSteps);
+		generationCount += numSteps;
 	}
 
 	/**
@@ -392,39 +435,47 @@ public:
 };
 
 
+void SetBit(Universe& universe, int x, int y)
+{
+	for (int i = -1000; i <= 1000; i += 1000)
+		for (int j = -1000; j <= 1000; j += 1000)
+			universe.setBit(x + i, y + j);
+}
+
+
 int main(int argc, char* argv[])
 {
 	Universe universe;
 
-	universe.setBit(1, 0);
-	universe.setBit(2, 0);
-	universe.setBit(0, 1);
-	universe.setBit(1, 1);
-	universe.setBit(1, 2);
+	SetBit(universe, 1, 0);
+	SetBit(universe, 2, 0);
+	SetBit(universe, 0, 1);
+	SetBit(universe, 1, 1);
+	SetBit(universe, 1, 2);
 
-	universe.root = universe.root->expandUniverse() ;
-	universe.root = universe.root->expandUniverse() ;
-	universe.root = universe.root->expandUniverse() ;
-	universe.root = universe.root->expandUniverse() ;
+	universe.runSteps(1000);
 
-	//do
+	char path[_MAX_PATH];
+	strcpy(path, argv[0]);
+	char* pFileName = PathFindFileNameA(path);
+
+	strcpy(pFileName, "results.txt");
+	ofstream outputFile(path);
+	if (!outputFile) 
 	{
-		universe.runStep();
-		cout << universe.generationCount << ' ' << universe.root->population << '\n';
+		cerr << "Unable to open output file.\n";
+		return EXIT_FAILURE;
 	}
-	//while (universe.generationCount < 1000);
 
-//*
-	int radius = 1 << (universe.root->level - 1);
-	for (int y = -radius; y < radius; ++y)
+	for (int y = -500; y < 500; ++y)
 	{
-		for (int x = -radius; x < radius; ++x)
+		for (int x = -500; x < 500; ++x)
 		{
-			cout << (universe.root->getBit(x, y)? '*' : '.');
+			outputFile << ((int) universe.root->getBit(x, y));
 		}
-		cout << '\n';
+		outputFile << '\n';
 	}
-//*/
+
 	return 0;
 }
 
