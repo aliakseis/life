@@ -10,12 +10,15 @@
 #include <shlwapi.h>
 #pragma comment(lib, "shlwapi")
 
+#include <assert.h>
+
 using stdext::hash_set;
 using stdext::hash_compare;
 
-//using std::cout;
+using std::cout;
 using std::cerr;
 using std::ofstream;
+using std::endl;
 
 
 class Node;
@@ -32,6 +35,22 @@ namespace stdext
 size_t hash_value(Node*);
 
 }
+/*
+class hash_compare_ex : public hash_compare<Node*, IsNodePtrLess>
+{
+public:
+    // parameters for hash table
+    // min_buckets = 2 ^^ N, 0 < N
+    enum { min_buckets = 16 * 1024 };	
+
+};
+//*/
+
+
+//enum { HASH_SIZE = 104729 };
+//enum { HASH_SIZE = 127717 };
+enum { HASH_SIZE = 128 * 1024 };
+//enum { HASH_SIZE = 64 * 1024 };
 
 /**
 *   This class contains the tree maintenance functions for quadtrees.
@@ -39,7 +58,9 @@ size_t hash_value(Node*);
 class Node 
 {
 
-	typedef hash_set<Node*, hash_compare<Node*, IsNodePtrLess> > CacheType;
+	//typedef hash_set<Node*, 
+	//	hash_compare<Node*, IsNodePtrLess>
+	//> CacheType;
 
 public:
 	/**
@@ -49,8 +70,11 @@ public:
 	{
 		nw = ne = sw = se = 0 ;
 		level = 0 ;
-		alive = living ;
-		population = alive ? 1 : 0 ;
+		//alive = living ;
+		population = living;//alive ? 1 : 0 ;
+
+        //hash = population;
+
 		result[0] = 0;
 		result[1] = 0;
 	}
@@ -66,7 +90,13 @@ public:
 		level = nw_->level + 1 ;
 		population = nw->population + ne->population +
 			sw->population + se->population ;
-		alive = population > 0 ;
+		//alive = population > 0 ;
+
+       // hash =  size_t(nw) +
+			    //11 * size_t(ne) +
+			    //101 * size_t(sw) +
+			    //1007 * size_t(se) ;
+
 		result[0] = 0;
 		result[1] = 0;
 	}
@@ -101,8 +131,11 @@ public:
 	*   than false/true.
 	*/
 	int getBit(int x, int y) {
+
+        if (!population)
+            return 0;
 		if (level == 0)
-			return alive ? 1 : 0 ;
+			return 1;//population ? 1 : 0 ;
 		int offset = 1 << (level - 2) ;
 		if (x < 0)
 			if (y < 0)
@@ -118,9 +151,9 @@ public:
 	/**
 	*   Build an empty tree at the given level.
 	*/
-	Node* emptyTree(int lev) {
+	static Node* emptyTree(int lev) {
 		if (lev == 0)
-			return create(false) ;
+			return &emptyNode;//create(false) ;
 		Node* n = emptyTree(lev-1) ;
 		return create(n, n, n, n) ;
 	}
@@ -253,14 +286,15 @@ public:
 	/**
 	*   create functions.
 	*/
-	static Node* create(bool living) {
-		return Node(living).intern() ;
-	}
+	//static Node* create(bool living) {
+	//	return Node(living).intern() ;
+	//}
 	static Node* create(Node* nw, Node* ne, Node* sw, Node* se) {
 		return Node(nw, ne, sw, se).intern() ;
 	}
 	static Node* create() {
-		return Node(false).emptyTree(3) ;
+		return //Node(false).
+            emptyTree(3) ;
 	}
 
 	/**
@@ -270,29 +304,38 @@ public:
 
 	size_t hashCode() 
 	{
-		if (level == 0)
-			return population ;
-		return size_t(nw) +
+        //return hash;
+
+        assert(level != 0);
+
+		//if (level == 0)
+		//	return population ;
+
+		return (size_t(nw) +
 			11 * size_t(ne) +
 			101 * size_t(sw) +
-			1007 * size_t(se) ;
+			1007 * size_t(se)) >> 5;
 	}
 	
 	bool operator ==(const Node& t) const
 	{
+        assert(level != 0);
+
 		if (level != t.level)
 			return false ;
-		if (level == 0)
-			return alive == t.alive ;
-		return nw == t.nw && ne == t.ne && sw == t.sw && se == t.se ;
+		//if (level == 0)
+		//	return population == t.population;
+		return nw == t.nw && ne == t.ne && sw == t.sw && se == t.se;
 	}
 
 	bool operator < (const Node& other) const
 	{
+        assert(level != 0);
+
 		if (level < other.level)
 			return true;
-		if (level == 0)
-			return alive < other.alive;
+		//if (level == 0)
+		//	return population < other.population;
 
 		return nw < other.nw 
 			|| nw == other.nw && (ne < other.ne 
@@ -305,13 +348,33 @@ public:
 	*/
 	Node* intern() {
 
-		CacheType::iterator it = cache.find(this);
-		if (it != cache.end())
-			return *it;
+		//CacheType::iterator it = cache.find(this);
+		//if (it != cache.end())
+		//	return *it;
 
-		Node* canon = new Node(*this);
-		cache.insert(canon);
+		//Node* canon = new Node(*this);
+		//cache.insert(canon);
 
+		//return canon;
+
+		int i =  hashCode() % HASH_SIZE;
+		int disp = 0;//(0 == i)? 1 : HASH_SIZE - i;
+
+		Node* canon;
+		while ((canon = hashTable[i]) != 0)
+		{
+			if (*this == *canon)
+			{
+				return canon;
+			}
+
+			disp++;
+			if ((i -= disp) < 0) 
+				i += HASH_SIZE;
+		}
+
+		canon = new Node(*this);
+		hashTable[i] = canon;
 		return canon;
 	}
 
@@ -325,8 +388,8 @@ public:
 	*/
 	Node* oneGen(int bitmask) {
 		if (bitmask == 0)
-			return create(false) ;
-		int self = (bitmask >> 5) & 1 ;
+			return &emptyNode;//create(false) ;
+		int self = bitmask & (1 << 5);//(bitmask >> 5) & 1 ;
 		bitmask &= 0x757 ; // mask out bits we don't care about
 		int neighborCount = 0 ;
 		while (bitmask != 0) {
@@ -334,9 +397,9 @@ public:
 			bitmask &= bitmask - 1 ; // clear least significant bit
 		}
 		if (neighborCount == 3 || (neighborCount == 2 && self != 0))
-			return create(true) ;
+			return &aliveNode;//create(true) ;
 		else
-			return create(false) ;
+			return &emptyNode;//create(false) ;
 	}
 	/**
 	*   At level 2, we can use slow simulation to compute the next
@@ -351,20 +414,48 @@ public:
 			oneGen(allbits>>1), oneGen(allbits)) ;
 	}
 
+
+    void* operator new(size_t count)
+    {
+        void* result = bufferPtr;
+        bufferPtr += count;
+        return result;
+    }
+
+    void operator delete(void* ptr) 
+    {
+    }
+
 //private:
 	Node *nw, *ne, *sw, *se ; // our children
 	int level ;           // distance to root
-	bool alive ;       // if leaf node, are we alive or dead?
+	//bool alive ;       // if leaf node, are we alive or dead?
 	unsigned long population ;   // we cache the population here
 	Node* result[2];
 
-	static CacheType cache;
+    //size_t hash;
+
+	//static CacheType cache;
 	static Node aliveNode;
+	static Node emptyNode;
+
+    static char buffer[16 * 1024 * 1024]; 
+    static char* bufferPtr;
+
+	static Node* hashTable[HASH_SIZE];
 };
 
-Node::CacheType Node::cache;
+//Node::CacheType Node::cache;
 
 Node Node::aliveNode(true);
+Node Node::emptyNode(false);
+
+char Node::buffer[16 * 1024 * 1024]; 
+
+char* Node::bufferPtr = Node::buffer;
+
+Node* Node::hashTable[HASH_SIZE];
+
 
 
 bool IsNodePtrLess::operator() (Node* left, Node* right) const
@@ -390,12 +481,12 @@ public:
 
 	void runSteps(unsigned long numSteps) 
 	{
-		while (root->level < 3 ||
-				root->nw->population != root->nw->se->se->population ||
-				root->ne->population != root->ne->sw->sw->population ||
-				root->sw->population != root->sw->ne->ne->population ||
-				root->se->population != root->se->nw->nw->population)
-			root = root->expandUniverse();
+		//while (root->level < 3 ||
+		//		root->nw->population != root->nw->se->se->population ||
+		//		root->ne->population != root->ne->sw->sw->population ||
+		//		root->sw->population != root->sw->ne->ne->population ||
+		//		root->se->population != root->se->nw->nw->population)
+		//	root = root->expandUniverse();
 
 		unsigned long stepSize;
 		while ((stepSize = 1ul << (root->level - 2)) < numSteps)
@@ -445,7 +536,13 @@ void SetBit(Universe& universe, int x, int y)
 
 int main(int argc, char* argv[])
 {
-	Universe universe;
+	LARGE_INTEGER frequency;
+	::QueryPerformanceFrequency(&frequency);
+	LARGE_INTEGER start, stop;
+
+	::QueryPerformanceCounter(&start);
+    
+    Universe universe;
 
 	SetBit(universe, 1, 0);
 	SetBit(universe, 2, 0);
@@ -455,26 +552,81 @@ int main(int argc, char* argv[])
 
 	universe.runSteps(1000);
 
+//    cout << "Cache size: " << Node::cache.size() << '\n';
+
+//*
 	char path[_MAX_PATH];
 	strcpy(path, argv[0]);
 	char* pFileName = PathFindFileNameA(path);
 
 	strcpy(pFileName, "results.txt");
-	ofstream outputFile(path);
-	if (!outputFile) 
+
+
+	HANDLE hFile = ::CreateFileA(
+		path,						// pointer to name of the file
+		GENERIC_READ|GENERIC_WRITE,// access (read-write) mode
+		0,									// share mode 
+		NULL,								// pointer to security attributes 
+		CREATE_ALWAYS,					// how to create 
+		FILE_ATTRIBUTE_NORMAL,		// file attributes 
+		NULL								// handle to file with attributes to copy
+	); 
+	if(INVALID_HANDLE_VALUE == hFile)
+		return EXIT_FAILURE;
+ 
+	HANDLE hFileMapping = ::CreateFileMapping(
+		hFile,			// handle to file to map 
+		NULL,				// optional security attributes 
+		PAGE_READWRITE,// protection for mapping object 
+		0,					// high-order 32 bits of object size 
+		1000 * 1002,		// low-order 32 bits of object size 
+		NULL				// name of file-mapping object 
+	); 
+	if(NULL == hFileMapping)
 	{
-		cerr << "Unable to open output file.\n";
+		::CloseHandle(hFile);
 		return EXIT_FAILURE;
 	}
+	LPVOID pBuf = ::MapViewOfFile(hFileMapping, FILE_MAP_WRITE, 0, 0, 1000 * 1002);
+	if(NULL == pBuf)
+	{
+		::CloseHandle(hFile);
+		::CloseHandle(hFileMapping);
+		return EXIT_FAILURE;
+	}
+
+    char* pPos = (char*) pBuf;
+
+	//ofstream outputFile(path);
+	//if (!outputFile) 
+	//{
+	//	cerr << "Unable to open output file.\n";
+	//	return EXIT_FAILURE;
+	//}
 
 	for (int y = -500; y < 500; ++y)
 	{
 		for (int x = -500; x < 500; ++x)
 		{
-			outputFile << ((int) universe.root->getBit(x, y));
+			//outputFile << ((int) universe.root->getBit(x, y));
+            *pPos++ = '0' + universe.root->getBit(x, y);
 		}
-		outputFile << '\n';
+		//outputFile << '\n';
+        *pPos++ = 13;
+        *pPos++ = 10;
 	}
+
+//	outputFile.flush();
+
+	::UnmapViewOfFile(pBuf);
+	::CloseHandle(hFile);
+	::CloseHandle(hFileMapping);
+//*/
+
+	QueryPerformanceCounter(&stop);
+	cout << "\nTotal time: " <<
+		double(stop.QuadPart - start.QuadPart) / frequency.QuadPart <<
+		" seconds" << endl;
 
 	return 0;
 }
