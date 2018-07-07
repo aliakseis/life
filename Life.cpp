@@ -18,13 +18,44 @@
 
 #include <assert.h>
 
+#define MULTITHREADED
 
 using std::cerr;
 using std::ofstream;
 using std::endl;
 
 
+#ifdef MULTITHREADED
+
+enum { HASH_SIZE = 128 * 1024 };
+
+
+class Node;
+
+class NextGeneration_MT
+{
+public:
+    NextGeneration_MT(Node* pBase, unsigned long supplement = 0);
+    ~NextGeneration_MT();
+    operator Node*();
+
+private:
+    NextGeneration_MT(const NextGeneration_MT&);
+    NextGeneration_MT& operator = (const NextGeneration_MT&);
+
+    static DWORD CALLBACK ProcessData(void* pv);
+
+    unsigned long m_supplement;
+    Node* m_pBase;
+    Node* m_pNext;
+    HANDLE m_hEvent;
+};
+
+#else
+
 enum { HASH_SIZE = 64 * 1024 };
+
+#endif
 
 /**
 *   This class contains the tree maintenance functions for quadtrees.
@@ -35,8 +66,17 @@ public:
 	/**
 	*   Construct a node given four children.
 	*/
+
+    Node()
+    {
+        level = 0;
+    }
+
 	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, bool living) 
 	{
+#ifdef MULTITHREADED
+        render[0] = render[1] = false;
+#endif
 		nw = nw_ ;
 		ne = ne_ ;
 		sw = sw_ ;
@@ -46,10 +86,10 @@ public:
 
 	void setup()
 	{
-		// Nasty hack
-		level = (nw < (void*)0x800)? 2 : nw->level + 1 ;
 		result[0] = 0;
 		result[1] = 0;
+        // Nasty hack
+        level = (nw < (void*)0x800) ? 2 : nw->level + 1;
 	}
 
 	/**
@@ -208,6 +248,10 @@ public:
 	{
 		bool direct = level > 2 && (supplement & (1ul << (level - 3)));
 
+#ifdef MULTITHREADED
+        while (render[direct])
+            Sleep(0);
+#endif
 		if (result[direct] != 0)
 			return result[direct];
 		if (!alive)
@@ -215,6 +259,9 @@ public:
 		if (level == 2)
 			return result[direct] = slowSimulation() ;
 
+#ifdef MULTITHREADED
+        render[direct] = true;
+#endif
 		Node *n00, *n01 ,*n02 ,*n10 ,*n11 ,*n12 ,*n20 ,*n21 ,*n22; 
 
 		if (direct)
@@ -242,12 +289,42 @@ public:
 			n22 = se->nextGeneration();
 		}
 
-		return result[direct] = create(
+        //return 
+        result[direct] = create(
 			create(n00, n01, n10, n11)->nextGeneration(supplement),
 			create(n01, n02, n11, n12)->nextGeneration(supplement),
 			create(n10, n11, n20, n21)->nextGeneration(supplement),
 			create(n11, n12, n21, n22)->nextGeneration(supplement)) ;
+
+#ifdef MULTITHREADED
+        render[direct] = false;
+#endif
+        return result[direct];
+    }
+
+#ifdef MULTITHREADED
+    Node* nextGeneration_MT(unsigned long supplement)
+    {
+        assert(!(level > 2 && (supplement & (1ul << (level - 3)))));
+
+        NextGeneration_MT n00(nw);
+        NextGeneration_MT n01(create(nw->ne, ne->nw, nw->se, ne->sw));
+        NextGeneration_MT n02(ne);
+        NextGeneration_MT n10(create(nw->sw, nw->se, sw->nw, sw->ne));
+        NextGeneration_MT n11(create(nw->se, ne->sw, sw->ne, se->nw));
+        NextGeneration_MT n12(create(ne->sw, ne->se, se->nw, se->ne));
+        NextGeneration_MT n20(sw);
+        NextGeneration_MT n21(create(sw->ne, se->nw, sw->se, se->sw));
+        NextGeneration_MT n22(se);
+
+        NextGeneration_MT nw_(create(n00, n01, n10, n11), supplement);
+        NextGeneration_MT ne_(create(n01, n02, n11, n12), supplement);
+        NextGeneration_MT sw_(create(n10, n11, n20, n21), supplement);
+        NextGeneration_MT se_(create(n11, n12, n21, n22), supplement);
+
+        return create(nw_, ne_, sw_, se_);
 	}
+#endif
 
 	/**
 	*   create functions.
@@ -266,16 +343,16 @@ public:
 
 	size_t hashCode() 
 	{
-		size_t result = (size_t(nw) +
+		size_t res = (size_t(nw) +
 			11 * size_t(ne) +
 			101 * size_t(sw) +
 			1007 * size_t(se));
 
 		// Nasty hack
 		if (nw > (void*)0x800)
-			result >>= 5;
+			res >>= 5;
 
-		return result;
+		return res;
 	}
 	
 	bool operator ==(const Node& t) const
@@ -287,25 +364,7 @@ public:
 	*   Given a node, return the canonical one if it exists, or make it
 	*   the canonical one.
 	*/
-	Node* intern() 
-	{
-		size_t i =  hashCode() % HASH_SIZE;
-
-		Node* canon;
-		for (canon = hashTable[i]; canon != 0; canon = canon->next)
-		{
-			if (*this == *canon)
-			{
-				return canon;
-			}
-		}
-		canon = new Node(*this);
-		canon->setup();
-		assert(canon->level == 2 || canon->alive == (canon->ne->alive || canon->nw->alive || canon->se->alive || canon->sw->alive));
-		canon->next = hashTable[i];
-		hashTable[i] = canon;
-		return canon;
-	}
+	Node* intern();
 
 	/**
 	*   Given an integer with a bitmask indicating which bits are
@@ -348,6 +407,7 @@ public:
 	}
 
 
+#ifndef MULTITHREADED
     void* operator new(size_t count)
     {
         void* result = bufferPtr;
@@ -358,8 +418,15 @@ public:
     void operator delete(void*) 
     {
     }
+#endif
 
 	Node *nw, *ne, *sw, *se ; // our children
+#ifdef MULTITHREADED
+    volatile long level;           // distance to root
+    volatile bool render[2];
+    bool alive;       // if leaf node, are we alive or dead?
+    Node* volatile result[2];
+#else
 	int level ;           // distance to root
 	bool alive ;       // if leaf node, are we alive or dead?
 	Node* result[2];
@@ -369,18 +436,75 @@ public:
     static char* bufferPtr;
 
 	static Node* hashTable[HASH_SIZE];
-
+#endif
 	static bool cachedOneGen[0x800];
 };
 
 
+#ifdef MULTITHREADED
+static Node hashTable[HASH_SIZE];
+#else
 char Node::buffer[16 * 1024 * 1024]; 
 
 char* Node::bufferPtr = Node::buffer;
 
 Node* Node::hashTable[HASH_SIZE];
+#endif
 
 bool Node::cachedOneGen[0x800];
+
+#ifdef MULTITHREADED
+Node* Node::intern()
+{
+    int i = hashCode() % HASH_SIZE;
+    int disp = 0;
+
+    Node* canon;
+    for (;;)
+    {
+        long level_;
+        while ((level_ = (canon = hashTable + i)->level) > 1)
+        {
+            if (*this == *canon)
+            {
+                return canon;
+            }
+
+            disp++;
+            if ((i -= disp) < 0)
+                i += HASH_SIZE;
+        }
+        if (level_ != 1 && 0 == InterlockedCompareExchange(&hashTable[i].level, 1, 0))
+            break;
+        //Sleep(0);
+    }
+
+    level = 1;
+    *canon = *this;
+    canon->setup();
+    return canon;
+}
+#else
+Node* Node::intern()
+{
+	size_t i =  hashCode() % HASH_SIZE;
+
+	Node* canon;
+	for (canon = hashTable[i]; canon != 0; canon = canon->next)
+	{
+		if (*this == *canon)
+		{
+			return canon;
+		}
+	}
+	canon = new Node(*this);
+	canon->setup();
+	assert(canon->level == 2 || canon->alive == (canon->ne->alive || canon->nw->alive || canon->se->alive || canon->sw->alive));
+	canon->next = hashTable[i];
+	hashTable[i] = canon;
+	return canon;
+}
+#endif
 
 class Universe
 {
@@ -388,6 +512,21 @@ public:
 	Universe()
 	{
 		// Initialize static nodes stuff
+#ifdef MULTITHREADED
+        static bool first = true;
+
+        if (first)
+        {
+            first = false;
+            for (int i = 0; i < sizeof(Node::cachedOneGen) / sizeof(Node::cachedOneGen[0]); ++i)
+                Node::cachedOneGen[i] = Node::oneGen(i);
+        }
+        else
+        {
+            for (int i = 0; i < HASH_SIZE; ++i)
+                hashTable[i].level = 0;
+        }
+#else
 		if (Node::bufferPtr != Node::buffer)
 		{
 			Node::bufferPtr = Node::buffer;
@@ -398,7 +537,7 @@ public:
 			for (int i = 0; i < sizeof(Node::cachedOneGen) / sizeof(Node::cachedOneGen[0]); ++i)
 				Node::cachedOneGen[i] = Node::oneGen(i);
 		}
-
+#endif
 		generationCount = 0;
 		root = Node::create();
 	}
@@ -416,7 +555,11 @@ public:
 		while ((stepSize = 1ul << (root->level - 2)) < numSteps)
 			root = root->expandUniverse();
 
+#ifdef MULTITHREADED
+        root = root->nextGeneration_MT(stepSize - numSteps);
+#else
 		root = root->nextGeneration(stepSize - numSteps);
+#endif
 		generationCount += numSteps;
 	}
 
@@ -447,6 +590,40 @@ public:
 	Node* root;
 	unsigned long generationCount;
 };
+
+/////////////////////////////////////////////////////////////////////
+
+#ifdef MULTITHREADED
+NextGeneration_MT::NextGeneration_MT(Node* pBase, unsigned long supplement /*= 0*/)
+    : m_pBase(pBase), m_pNext(0), m_supplement(supplement), m_hEvent(CreateEvent(NULL, TRUE, FALSE, NULL))
+{
+    QueueUserWorkItem(
+        ProcessData,
+        this,
+        //WT_EXECUTEDEFAULT ); //<< don't use, despite docs.            
+        WT_EXECUTELONGFUNCTION);
+}
+
+NextGeneration_MT::~NextGeneration_MT()
+{
+    CloseHandle(m_hEvent);
+}
+
+NextGeneration_MT::operator Node*()
+{
+    if (0 == m_pNext)
+        WaitForSingleObject(m_hEvent, INFINITE);
+    return m_pNext;
+}
+
+DWORD CALLBACK NextGeneration_MT::ProcessData(void* pv)
+{
+    NextGeneration_MT* pThis = (NextGeneration_MT*)pv;
+    pThis->m_pNext = pThis->m_pBase->nextGeneration(pThis->m_supplement);
+    SetEvent(pThis->m_hEvent);
+    return 0;
+}
+#endif
 
 /////////////////////////////////////////////////////////////////////
 
