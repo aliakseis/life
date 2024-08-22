@@ -75,7 +75,8 @@ public:
 	Node(Node* nw_, Node* ne_, Node* sw_, Node* se_, bool living) 
 	{
 #ifdef MULTITHREADED
-        render[0] = render[1] = false;
+		render[0] = false;
+		render[1] = false;
 #endif
 		nw = nw_ ;
 		ne = ne_ ;
@@ -246,12 +247,14 @@ public:
 	*/
 	Node* nextGeneration(unsigned long supplement = 0)
 	{
-		bool direct = level > 2 && (supplement & (1ul << (level - 3)));
-
+		const bool direct = level > 2 && (supplement & (1ul << (level - 3)));
+/*
 #ifdef MULTITHREADED
-        while (render[direct])
-            Sleep(0);
+        //while (render[direct])
+        //    Sleep(0);
+		render[direct].wait(true);
 #endif
+*/
 		if (result[direct] != 0)
 			return result[direct];
 		if (!alive)
@@ -260,7 +263,10 @@ public:
 			return result[direct] = slowSimulation() ;
 
 #ifdef MULTITHREADED
-        render[direct] = true;
+        //render[direct] = true;
+		bool expected = false;
+		if (render[direct].compare_exchange_strong(expected, true)) {
+			if (!result[direct]) {
 #endif
 		Node *n00, *n01 ,*n02 ,*n10 ,*n11 ,*n12 ,*n20 ,*n21 ,*n22; 
 
@@ -297,7 +303,14 @@ public:
 			create(n11, n12, n21, n22)->nextGeneration(supplement)) ;
 
 #ifdef MULTITHREADED
-        render[direct] = false;
+			}
+			render[direct] = false;
+			render[direct].notify_all();
+		}
+		else
+		{
+			render[direct].wait(true);
+		}
 #endif
         return result[direct];
     }
@@ -420,10 +433,24 @@ public:
     }
 #endif
 
+	Node& operator = (const Node& other)
+	{
+        nw = other.nw;
+        ne = other.ne;
+        sw = other.sw;
+        se = other.se;
+        alive = other.alive;
+        level = other.level;
+        result[0] = other.result[0];
+        result[1] = other.result[1];
+        return *this;
+	}
+
 	Node *nw, *ne, *sw, *se ; // our children
 #ifdef MULTITHREADED
     volatile long level;           // distance to root
-    volatile bool render[2];
+    //volatile bool render[2];
+	std::atomic_bool render[2];
     bool alive;       // if leaf node, are we alive or dead?
     Node* volatile result[2];
 #else
