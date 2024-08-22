@@ -685,10 +685,12 @@ int main(int /*argc*/, char* argv[])
 			outputFile << '\n';
 		}
 
-		outputFile << "\nSolution time: " <<
-			double(stop.QuadPart - start.QuadPart) / frequency.QuadPart / runsCount <<
-			" seconds" << endl;
-
+		for (auto out : { static_cast<std::ostream*>(&outputFile), &std::cout})
+		{
+			*out << "\nSolution time: " <<
+				double(stop.QuadPart - start.QuadPart) / frequency.QuadPart / runsCount <<
+				" seconds" << endl;
+		}
 		break;
 	} 
 
